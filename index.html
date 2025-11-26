@@ -399,10 +399,16 @@
         <div class="modal auth-modal">
             <h3 style="margin-top:0; text-align:center; color: var(--primary);">Akun Supabase</h3>
             <div class="auth-form">
-                <input type="email" id="auth-email" placeholder="Email Address">
+                <input type="text" id="auth-username" placeholder="ID Pengguna (Bebas)">
                 <input type="password" id="auth-password" placeholder="Password">
-                <button class="toggle-btn" style="background: var(--primary); color: white;" onclick="handleLogin()">Login (Masuk)</button>
-                <button class="toggle-btn" style="background: transparent; border: 2px solid var(--primary); color: var(--primary);" onclick="handleSignup()">Sign Up (Daftar)</button>
+                
+                <!-- TOMBOL LUPA PASSWORD DI SINI -->
+                <div style="text-align:right; margin-bottom:10px; font-size:0.8rem;">
+                    <span onclick="handleForgot()" style="cursor:pointer; color:var(--primary); text-decoration:underline;">Lupa Password?</span>
+                </div>
+
+                <button class="toggle-btn" style="background: var(--primary); color: white;" onclick="handleLogin()">Login (ID & Password)</button>
+                <button class="toggle-btn" style="background: transparent; border: 2px solid var(--primary); color: var(--primary);" onclick="handleSignup()">Daftar Baru</button>
             </div>
             <div id="auth-msg" class="auth-msg"></div>
             <div style="text-align:center; margin-top:10px;">
@@ -423,7 +429,6 @@
         let currentUser = null;
 
         // Init Supabase if configured
-        // [FIX] Cek sederhana: Jika URL dan Key ada, maka init.
         if (SUPABASE_URL && SUPABASE_KEY && typeof supabase !== 'undefined') {
             supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
             checkSession();
@@ -437,19 +442,25 @@
             if (session) {
                 currentUser = session.user;
                 updateAuthUI(true);
-                loadCloudProgress(); // Load data from DB
+                // PENTING: Jangan load dari cloud jika init awal, tunggu sampai pasti.
+                // Biarkan logika loadCloudProgress yang handle
+                loadCloudProgress(); 
             } else {
                 updateAuthUI(false);
             }
 
             supabaseClient.auth.onAuthStateChange((_event, session) => {
                 if (session) {
+                    // LOGIN DETECTED
                     currentUser = session.user;
                     updateAuthUI(true);
                     loadCloudProgress();
                 } else {
+                    // LOGOUT DETECTED
                     currentUser = null;
                     updateAuthUI(false);
+                    // === FIX: BERSIHKAN DATA LOKAL SAAT SESI HABIS ===
+                    handleLocalClear();
                 }
             });
         }
@@ -470,41 +481,114 @@
         function openAuthModal() { document.getElementById('auth-modal').classList.add('show'); }
         function closeAuthModal() { document.getElementById('auth-modal').classList.remove('show'); document.getElementById('auth-msg').innerText = ''; }
 
+        // === FITUR LUPA PASSWORD ===
+        function handleForgot() {
+            const msg = document.getElementById('auth-msg');
+            msg.style.color = 'var(--text)';
+            msg.innerHTML = "Hubungi Admin (Riyan) untuk meminta password Anda.";
+        }
+
         async function handleLogin() {
             if(!supabaseClient) return alert('Konfigurasi Supabase belum diisi!');
-            const email = document.getElementById('auth-email').value;
+            const username = document.getElementById('auth-username').value;
             const password = document.getElementById('auth-password').value;
             const msg = document.getElementById('auth-msg');
             
+            if(!username || !password) { msg.innerText = "ID dan Password wajib diisi!"; return; }
+
+            const cleanUsername = username.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+            if(cleanUsername.length < 3) { msg.innerText = "ID harus minimal 3 huruf/angka!"; return; }
+
+            const email = "u" + cleanUsername + "@cho.app";
+
             msg.innerText = "Proses login...";
             const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-            if (error) msg.innerText = "Error: " + error.message;
-            else { closeAuthModal(); }
+            if (error) {
+                if (error.message.includes("Email not confirmed")) {
+                    msg.innerText = "Error: Email belum dikonfirmasi. Harap matikan 'Confirm Email' di Dashboard Supabase Anda.";
+                } else {
+                    msg.innerText = "Error: " + error.message;
+                }
+            } else { 
+                // BERHASIL LOGIN
+                closeAuthModal(); 
+                // Data akan di-load otomatis oleh onAuthStateChange
+            }
         }
 
         async function handleSignup() {
             if(!supabaseClient) return alert('Konfigurasi Supabase belum diisi!');
-            const email = document.getElementById('auth-email').value;
+            const username = document.getElementById('auth-username').value;
             const password = document.getElementById('auth-password').value;
             const msg = document.getElementById('auth-msg');
 
+            if(!username || !password) { msg.innerText = "ID dan Password wajib diisi!"; return; }
+
+            const cleanUsername = username.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+            if(cleanUsername.length < 3) { msg.innerText = "ID harus minimal 3 huruf/angka!"; return; }
+
+            const email = "u" + cleanUsername + "@cho.app";
+
             msg.innerText = "Proses daftar...";
-            const { error } = await supabaseClient.auth.signUp({ email, password });
-            if (error) msg.innerText = "Error: " + error.message;
-            else { msg.innerText = "Sukses! Silakan cek email untuk konfirmasi (jika perlu) atau login."; }
+            const { data, error } = await supabaseClient.auth.signUp({ email, password });
+            
+            if (error) {
+                msg.innerText = "Error: " + error.message;
+            } else { 
+                // SUKSES DAFTAR -> SIMPAN PASSWORD CADANGAN (BACKUP)
+                if (data.user) {
+                    // === FIX: TAMBAHKAN ERROR HANDLING UNTUK INSERT ===
+                    try {
+                        const { error: secretError } = await supabaseClient.from('user_secrets').insert({
+                            user_id: data.user.id,
+                            username: username,
+                            password_hint: password 
+                        });
+                        
+                        if (secretError) {
+                            console.error("Gagal backup password (Supabase Error):", secretError);
+                            msg.innerText = "Sukses daftar, tapi gagal backup password: " + secretError.message + ". Cek console.";
+                            return; // Stop agar user tahu ada masalah
+                        }
+                        
+                    } catch(e) {
+                        console.error("Gagal simpan backup password (System Error):", e);
+                        msg.innerText = "Sukses daftar, tapi error sistem backup: " + e.message;
+                        return;
+                    }
+                }
+                
+                msg.innerText = "Sukses! Silakan login."; 
+            }
         }
 
         async function handleLogout() {
             if(!supabaseClient) return;
             await supabaseClient.auth.signOut();
-            alert("Anda telah logout.");
-            // Optional: Clear local state or keep it?
-            // For now, let's just keep local state active
+            alert("Anda telah logout. Data di perangkat ini dibersihkan.");
+            // Pembersihan dilakukan di onAuthStateChange
         }
 
-        // === SYNC LOGIC ===
+        // === FIX: FUNGSI PEMBERSIH DATA LOKAL ===
+        function handleLocalClear() {
+            vKnown = {};
+            kKnown = {};
+            localStorage.removeItem('knownVocabMap');
+            localStorage.removeItem('knownKanjiMap');
+            
+            // Refresh tampilan agar kosong
+            updateVocabKnownBtn();
+            drawCard();
+            if(currentTab === 'kanji') renderHeatmap();
+        }
+
+        // === SYNC LOGIC YANG DIPERBAIKI ===
+        let isCloudLoaded = false; // Flag agar tidak save sebelum load selesai
+
         async function loadCloudProgress() {
             if(!currentUser || !supabaseClient) return;
+            
+            isCloudLoaded = false; // Mulai loading
             
             // Fetch data from user_progress table
             const { data, error } = await supabaseClient
@@ -514,31 +598,36 @@
                 .single();
 
             if (data) {
-                // Merge or Replace? Let's Merge for safety, prioritizing Cloud
+                // === LOGIKA PENTING: TIMPA LOCAL DENGAN CLOUD ===
+                // Kita asumsikan data Cloud adalah kebenaran mutlak saat login baru.
                 if (data.vocab_data) {
-                    vKnown = { ...vKnown, ...data.vocab_data };
+                    vKnown = data.vocab_data; // TIMPA, JANGAN MERGE (agar tidak nyangkut)
                     localStorage.setItem('knownVocabMap', JSON.stringify(vKnown));
                 }
                 if (data.kanji_data) {
-                    kKnown = { ...kKnown, ...data.kanji_data };
+                    kKnown = data.kanji_data; // TIMPA
                     localStorage.setItem('knownKanjiMap', JSON.stringify(kKnown));
                 }
-                
-                // Refresh UI
-                if(currentTab === 'kanji') renderHeatmap();
-                if(currentTab === 'vocab') { updateVocabKnownBtn(); }
-                console.log("Progress loaded from Cloud");
+                console.log("Progress loaded from Cloud & Local Updated");
             } else {
-                // No data yet, maybe init?
-                console.log("No cloud data found, initializing...");
-                saveCloudProgress();
+                console.log("No cloud data found, starting fresh for this user.");
+                // Jika user baru, pastikan bersih
+                // handleLocalClear(); // Opsional: Bersihkan jika user baru benar-benar kosong
+                saveCloudProgress(); // Buat row baru
             }
+            
+            // Refresh UI
+            if(currentTab === 'kanji') renderHeatmap();
+            if(currentTab === 'vocab') { updateVocabKnownBtn(); drawCard(); }
+            
+            isCloudLoaded = true; // Selesai loading, boleh save sekarang
         }
 
         let saveTimeout = null;
         function triggerSave() {
-            if (!currentUser || !supabaseClient) return;
-            // Debounce save (wait 2 seconds after last action)
+            // HANYA SAVE JIKA SUDAH LOGIN DAN DATA CLOUD SUDAH TERLOAD (Mencegah overwrite kosong)
+            if (!currentUser || !supabaseClient || !isCloudLoaded) return;
+            
             clearTimeout(saveTimeout);
             saveTimeout = setTimeout(saveCloudProgress, 2000);
         }
