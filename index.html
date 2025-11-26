@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cho - Hapalan Kanji & Kotoba</title>
+    <link rel="icon" type="image/svg+xml" href="logo.svg">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+    <!-- Load Supabase dari CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        :root {
+            --primary: #ff7675;
+            --primary-dark: #d63031;
+            --secondary: #55efc4;
+            --secondary-dark: #00b894;
+            --bg: #dfe6e9;
+            --text: #2d3436;
+            --card-bg: #ffffff;
+            --width-std: 500px;
+        }
+
+        /* Dark Mode Variables */
+        [data-theme="dark"] {
+            --bg: #1e1e1e;
+            --text: #f5f6fa;
+            --card-bg: #2d2d2d;
+            --primary: #e17055; 
+            --primary-dark: #ff7675;
+            --secondary-dark: #55efc4;
+        }
+
+        /* === PERBAIKAN LOGO UNTUK MODE GELAP === */
+        [data-theme="dark"] .logo-img {
+            filter: invert(1) brightness(2);
+            transition: filter 0.3s;
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0; padding: 20px;
+            display: flex; flex-direction: column; align-items: center;
+            min-height: 100vh;
+            transition: background 0.3s, color 0.3s;
+        }
+        
+        /* HEADER & LOGO */
+        .app-header { display: flex; justify-content: space-between; align-items: center; width: 100%; max-width: var(--width-std); margin-bottom: 20px; }
+        .logo-group { display: flex; align-items: center; gap: 10px; }
+        .logo-img { height: 35px; width: auto; display: block; border-radius: 8px; transition: filter 0.3s; }
+        
+        /* Header Controls (Theme + Auth) */
+        .header-controls { display: flex; align-items: center; gap: 10px; }
+
+        /* AUTH BUTTON */
+        .auth-btn {
+            background: var(--primary); color: white; border: none;
+            padding: 8px 12px; border-radius: 8px; font-weight: bold; cursor: pointer;
+            font-size: 0.85rem; transition: 0.2s;
+        }
+        .auth-btn:hover { background: var(--primary-dark); }
+        .auth-btn.logged-in { background: var(--secondary-dark); }
+
+        /* CONTAINER UTAMA */
+        .main-container {
+            width: 100%; max-width: var(--width-std);
+            background: var(--card-bg);
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            padding: 25px;
+            border: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+            transition: background 0.3s;
+        }
+
+        /* TABS */
+        .tab-group {
+            display: flex; gap: 10px; margin-bottom: 20px;
+            background: rgba(0,0,0,0.05); padding: 5px; border-radius: 12px;
+        }
+        .tab-btn {
+            flex: 1; border: none; background: transparent;
+            padding: 10px; border-radius: 8px;
+            font-weight: bold; color: var(--text); opacity: 0.6; cursor: pointer;
+            transition: 0.2s;
+        }
+        .tab-btn.active { background: var(--card-bg); opacity: 1; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+
+        /* LEVEL SELECTOR */
+        .level-group { display: flex; gap: 5px; justify-content: center; margin-bottom: 15px; }
+        .lvl-btn {
+            flex: 1; padding: 8px 0; border: 2px solid var(--primary);
+            background: transparent; color: var(--primary);
+            border-radius: 8px; cursor: pointer; font-weight: bold;
+            transition: 0.2s;
+        }
+        .lvl-btn.active, .lvl-btn:hover { background: var(--primary); color: white; }
+
+        /* SECTION DISPLAY */
+        .section { display: none; animation: fadeIn 0.3s; }
+        .section.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* === FLASHCARD (KOSAKATA) === */
+        .card-canvas-wrapper {
+            width: 100%; aspect-ratio: 3/2;
+            background: var(--bg); border-radius: 15px;
+            border: 2px solid rgba(0,0,0,0.1); cursor: pointer;
+            margin-bottom: 15px; overflow: hidden;
+            position: relative;
+        }
+        canvas { width: 100%; height: 100%; display: block; }
+        
+        .fc-controls-area { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+        .fc-func-row { display: flex; gap: 10px; justify-content: center; }
+        .fc-nav-row { display: flex; gap: 10px; justify-content: space-between; }
+
+        .act-btn {
+            flex: 1; padding: 12px; border: none; border-radius: 10px;
+            background: rgba(0,0,0,0.05); color: var(--text); font-weight: bold;
+            cursor: pointer; transition: 0.1s; display: flex; align-items: center; justify-content: center;
+            min-width: 50px;
+        }
+        .act-btn:active { transform: scale(0.95); }
+        
+        .icon-svg { width: 24px; height: 24px; fill: currentColor; }
+        .act-btn.active-toggle { background: var(--secondary); color: white; }
+        .act-btn.tts-active { background: #74b9ff; color: white; }
+        .act-btn.filter-active { background: #fab1a0; color: white; border: 2px solid #e17055; }
+        
+        @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(85, 239, 196, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(85, 239, 196, 0); } 100% { box-shadow: 0 0 0 0 rgba(85, 239, 196, 0); } }
+        .act-btn.auto-active { background: var(--secondary); color: white; animation: pulse-green 2s infinite; }
+
+        .bottom-actions { display: flex; gap: 10px; margin-top: 10px; width: 100%; }
+        .action-bottom-btn {
+            flex: 1; width: 50%; padding: 12px 5px; border-radius: 10px; cursor: pointer;
+            font-weight: bold; font-size: 0.9rem; white-space: nowrap; 
+            display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.2s; box-sizing: border-box;
+        }
+
+        .vocab-known-btn { background: transparent; border: 2px solid rgba(0,0,0,0.1); color: var(--text); opacity: 0.8; }
+        .vocab-known-btn.is-known { background: var(--secondary); color: white; border-color: var(--secondary); opacity: 1; }
+        .list-btn { background: rgba(0,0,0,0.05); color: var(--text); border: none; }
+        .list-btn:hover { background: rgba(0,0,0,0.1); }
+
+        @media (max-width: 400px) {
+            .action-bottom-btn { font-size: 0.8rem; padding: 10px 2px; }
+            .bottom-actions { gap: 5px; }
+            .fc-controls { gap: 5px; }
+            .act-btn { padding: 10px 5px; }
+        }
+
+        /* === HEATMAP (KANJI) === */
+        .stats-bar { height: 8px; background: rgba(0,0,0,0.1); border-radius: 4px; margin-bottom: 15px; overflow: hidden; }
+        .stats-fill { height: 100%; background: var(--secondary); width: 0%; transition: width 0.5s; }
+        
+        .grid-wrapper { max-height: 65vh; overflow-y: auto; width: 100%; padding: 15px 10px; margin: -15px -10px; }
+        .grid-wrapper::-webkit-scrollbar { width: 6px; }
+        .grid-wrapper::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 3px; }
+
+        .heatmap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 10px; padding-bottom: 20px; }
+
+        .k-box {
+            aspect-ratio: 1/1; background: var(--card-bg); border: 2px solid rgba(0,0,0,0.1); border-radius: 8px;
+            display: flex; align-items: center; justify-content: center; font-size: 1.8rem; font-family: 'Noto Sans JP';
+            font-weight: bold; cursor: pointer; user-select: none; color: var(--text); transition: transform 0.15s ease, box-shadow 0.15s ease; position: relative;
+        }
+        .k-box:hover { transform: translateY(-4px) scale(1.05); border-color: var(--primary); box-shadow: 0 10px 20px rgba(0,0,0,0.15); z-index: 10; }
+        .k-box.known { background: var(--secondary); border-color: var(--secondary-dark); color: white; }
+
+        /* MODAL */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); backdrop-filter: blur(3px); display: none; align-items: flex-end; justify-content: center; z-index: 100;
+        }
+        .modal-overlay.show { display: flex; }
+        
+        .modal {
+            background: var(--card-bg); width: 100%; max-width: 500px; border-radius: 25px 25px 0 0; padding: 30px;
+            box-shadow: 0 -10px 30px rgba(0,0,0,0.2); animation: slideUp 0.3s; max-height: 85vh; overflow-y: auto; color: var(--text);
+        }
+        .modal.list-modal { max-width: 800px; height: 80vh; display: flex; flex-direction: column; }
+        .modal.auto-modal { max-width: 350px; height: auto; align-self: center; border-radius: 20px; }
+
+        /* LOGIN MODAL */
+        .modal.auth-modal { max-width: 400px; align-self: center; border-radius: 20px; }
+
+        @media(min-width: 600px) { .modal { border-radius: 20px; margin-bottom: 20px; align-self: center; } }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+        .modal-header { display: flex; gap: 20px; align-items: center; border-bottom: 2px solid rgba(0,0,0,0.1); padding-bottom: 15px; margin-bottom: 15px; }
+        .big-kanji { font-size: 4rem; color: var(--primary); background: rgba(255, 118, 117, 0.1); padding: 5px 15px; border-radius: 15px; }
+        .label { font-size: 0.7rem; opacity: 0.6; text-transform: uppercase; font-weight: bold; display: block; margin-bottom: 3px; }
+        
+        .reading-row { display: flex; gap: 15px; margin-bottom: 10px; background: rgba(0,0,0,0.03); padding: 15px; border-radius: 8px; }
+        .reading-col { flex: 1; }
+        .reading-list { display: flex; flex-direction: column; gap: 4px; }
+        .reading-item { font-weight: bold; padding-bottom: 4px; border-bottom: 1px dashed rgba(0,0,0,0.05); line-height: 1.4; }
+        .reading-item:last-child { border-bottom: none; }
+        
+        .toggle-btn {
+            width: 100%; padding: 15px; border: none; border-radius: 12px; background: rgba(0,0,0,0.05); font-weight: bold; cursor: pointer; font-size: 1rem; margin-top: 10px; color: var(--text);
+        }
+        .toggle-btn.is-known { background: var(--secondary); color: white; }
+        
+        #known-list-content { flex: 1; overflow-y: auto; padding-right: 5px; }
+        .known-list-item { display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid rgba(0,0,0,0.1); }
+        .k-word { font-weight: bold; font-size: 1.2rem; }
+        .del-btn { color: var(--primary); cursor: pointer; border: none; background: none; font-size: 1.2rem; font-weight: bold; padding: 0 10px; }
+
+        .range-container { margin: 20px 0; text-align: center; }
+        input[type=range] { width: 100%; margin: 10px 0; }
+        .range-val { font-size: 1.5rem; font-weight: bold; color: var(--primary); }
+
+        .status-msg { text-align: center; opacity: 0.6; font-size: 0.9rem; margin-top: 10px; }
+        .loader { border: 3px solid rgba(0,0,0,0.1); border-top: 3px solid var(--primary); border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 5px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .theme-toggle {
+            background: none; border: none; cursor: pointer; color: var(--text); opacity: 0.8;
+            padding: 8px; border-radius: 50%; transition: background 0.2s;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .theme-toggle:hover { background: rgba(0,0,0,0.1); opacity: 1; }
+        .theme-icon-img { width: 24px; height: 24px; object-fit: contain; }
+
+        /* AUTH FORM STYLES */
+        .auth-form input {
+            width: 100%; padding: 12px; margin-bottom: 10px;
+            border: 1px solid rgba(0,0,0,0.1); border-radius: 8px;
+            background: var(--bg); color: var(--text);
+        }
+        .auth-form button { margin-bottom: 5px; }
+        .auth-msg { text-align: center; font-size: 0.8rem; margin-top: 10px; }
+
+    </style>
+</head>
+<body>
+
+    <div class="app-header">
+        <div class="logo-group">
+            <img src="img/logo.svg" alt="Logo" class="logo-img">
+        </div>
+        
+        <div class="header-controls">
+            <!-- Login Button -->
+            <button class="auth-btn" id="headerAuthBtn" onclick="openAuthModal()">Login</button>
+            
+            <!-- Dark Mode Toggle -->
+            <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn" title="Ganti Tema">
+                <!-- Icon injected by JS -->
+            </button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="tab-group">
+            <button class="tab-btn active" onclick="setTab('vocab')">Kosakata</button>
+            <button class="tab-btn" onclick="setTab('kanji')">Peta Kanji</button>
+        </div>
+
+        <!-- === FLASHCARD KOSAKATA === -->
+        <div id="vocab-section" class="section active">
+            <div class="level-group" id="vocab-levels">
+                <button class="lvl-btn" onclick="loadVocab('n5')">N5</button>
+                <button class="lvl-btn" onclick="loadVocab('n4')">N4</button>
+                <button class="lvl-btn" onclick="loadVocab('n3')">N3</button>
+                <button class="lvl-btn" onclick="loadVocab('n2')">N2</button>
+                <button class="lvl-btn" onclick="loadVocab('n1')">N1</button>
+            </div>
+            
+            <div id="vocab-canvas-area" style="display:none;">
+                <div class="card-canvas-wrapper" id="cardWrapper">
+                    <canvas id="vocabCanvas"></canvas>
+                </div>
+                
+                <div class="fc-controls-area">
+                    <div class="fc-func-row">
+                        <button id="btn-filter" class="act-btn" onclick="toggleFilter()" title="Filter: Hanya Belum Hafal">
+                            <svg class="icon-svg" viewBox="0 0 24 24"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
+                        </button>
+                        <button id="btn-random" class="act-btn" onclick="toggleRandom()" title="Mode Acak">
+                            <svg class="icon-svg" viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>
+                        </button>
+                        <button id="btn-tts" class="act-btn" onclick="toggleTTS()" title="Text-to-Speech">
+                            <svg class="icon-svg" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+                        </button>
+                        <button id="btn-auto" class="act-btn" onclick="openAutoSettings()" title="Putar Otomatis">
+                            <svg class="icon-svg" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                        </button>
+                    </div>
+
+                    <div class="bottom-actions">
+                        <button id="btn-vocab-known" class="vocab-known-btn action-bottom-btn" onclick="toggleVocabKnown()">
+                            Tandai Sudah Hafal
+                        </button>
+                        <button class="list-btn action-bottom-btn" onclick="openKnownList()">
+                            Daftar Hafalan
+                        </button>
+                    </div>
+
+                    <div class="fc-nav-row">
+                        <button class="act-btn" onclick="prevCard()" title="Sebelumnya">
+                            <svg class="icon-svg" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                        </button>
+                        <button class="act-btn" onclick="nextCard()" title="Selanjutnya">
+                            <svg class="icon-svg" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="status-msg">Klik <b>Huruf Merah</b> untuk Detail Kanji • Klik Kosong untuk Balik</div>
+            </div>
+            <br>
+            <div id="vocab-msg" class="status-msg">Pilih level yang disediakan.</div>
+        </div>
+
+        <!-- === HEATMAP KANJI === -->
+        <div id="kanji-section" class="section">
+            <div class="level-group" id="kanji-levels">
+                <button class="lvl-btn" onclick="loadKanjiData('n5')">N5</button>
+                <button class="lvl-btn" onclick="loadKanjiData('n4')">N4</button>
+                <button class="lvl-btn" onclick="loadKanjiData('n3')">N3</button>
+                <button class="lvl-btn" onclick="loadKanjiData('n2')">N2</button>
+                <button class="lvl-btn" onclick="loadKanjiData('n1')">N1</button>
+            </div>
+
+            <div class="stats-bar"><div id="k-progress" class="stats-fill"></div></div>
+            <div style="text-align:center; font-size:0.8rem; opacity:0.6; margin-bottom:10px;">
+                Hafal: <span id="k-count">0</span> / <span id="k-total">0</span>
+            </div>
+
+            <div id="kanji-grid" class="heatmap-grid">
+                <div style="grid-column:1/-1; text-align:center; padding:20px; opacity:0.5;">Pilih level di atas</div>
+            </div>
+            <div class="status-msg" style="font-size:0.8rem;">Klik Kiri: Detail • Klik Kanan: Tandai Hafal</div>
+        </div>
+    </div>
+
+    <!-- MODAL DETAIL KANJI -->
+    <div id="modal" class="modal-overlay" onclick="if(event.target===this)closeModal()">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="big-kanji" id="m-char">?</div>
+                <div style="flex:1">
+                    <span class="label">Arti (Indonesia)</span>
+                    <div id="m-mean" style="font-size:1.3rem; font-weight:bold;">...</div>
+                    <div id="m-mean-en" style="font-size:0.9rem; opacity:0.6; font-style:italic;">...</div>
+                </div>
+            </div>
+            <div class="reading-row">
+                <div class="reading-col">
+                    <span class="label">Kunyomi</span>
+                    <div id="m-kun" class="reading-list" style="color:var(--primary);"></div>
+                </div>
+                <div class="reading-col" style="text-align:right">
+                    <span class="label">Onyomi</span>
+                    <div id="m-on" class="reading-list" style="color:#0984e3;"></div>
+                </div>
+            </div>
+            <button id="m-btn" class="toggle-btn" onclick="toggleKnownFromModal()">Tandai Sudah Hafal</button>
+            <div style="text-align:right; margin-top:15px;">
+                <button onclick="closeModal()" style="background:rgba(0,0,0,0.1); border:none; padding:8px 15px; border-radius:8px; cursor:pointer; color:var(--text);">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL LIST HAFALAN -->
+    <div id="list-modal" class="modal-overlay" onclick="if(event.target===this)closeListModal()">
+        <div class="modal list-modal">
+            <h3 style="margin-top:0; color:var(--primary);">Kosakata Terhafal</h3>
+            <div id="known-list-content"></div>
+            <div style="text-align:right; margin-top:15px; padding-top:10px; border-top:1px solid rgba(0,0,0,0.1);">
+                <button onclick="closeListModal()" style="background:rgba(0,0,0,0.1); border:none; padding:8px 15px; border-radius:8px; cursor:pointer; color:var(--text);">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL AUTO SETTINGS -->
+    <div id="auto-modal" class="modal-overlay">
+        <div class="modal auto-modal">
+            <h3 style="margin-top:0; text-align:center;">Kecepatan Putar</h3>
+            <div class="range-container">
+                <span id="range-val" class="range-val">3</span> Detik
+                <input type="range" id="speed-range" min="1" max="10" value="3" oninput="document.getElementById('range-val').innerText=this.value">
+            </div>
+            <div style="display:flex; gap:10px;">
+                <button onclick="startAutoPlay()" class="toggle-btn" style="background:var(--secondary); color:white;">Mulai (OK)</button>
+                <button onclick="closeAutoSettings()" class="toggle-btn" style="background:rgba(0,0,0,0.1);">Batal</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL AUTHENTICATION -->
+    <div id="auth-modal" class="modal-overlay">
+        <div class="modal auth-modal">
+            <h3 style="margin-top:0; text-align:center; color: var(--primary);">Akun Supabase</h3>
+            <div class="auth-form">
+                <input type="email" id="auth-email" placeholder="Email Address">
+                <input type="password" id="auth-password" placeholder="Password">
+                <button class="toggle-btn" style="background: var(--primary); color: white;" onclick="handleLogin()">Login (Masuk)</button>
+                <button class="toggle-btn" style="background: transparent; border: 2px solid var(--primary); color: var(--primary);" onclick="handleSignup()">Sign Up (Daftar)</button>
+            </div>
+            <div id="auth-msg" class="auth-msg"></div>
+            <div style="text-align:center; margin-top:10px;">
+                <button onclick="closeAuthModal()" style="background:none; border:none; color:var(--text); cursor:pointer; opacity:0.6;">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================
+        // KONFIGURASI SUPABASE (WAJIB DIISI)
+        // ============================================
+        const SUPABASE_URL = 'https://orryroqxvlqaiejaxnng.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ycnlyb3F4dmxxYWllamF4bm5nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYyODczNDksImV4cCI6MjA3MTg2MzM0OX0.W1ncCBlqXxIsdAAzkeGHAcAhwDdnQfgSDT2jvXl_zOY';
+        // ============================================
+        
+        let supabaseClient = null;
+        let currentUser = null;
+
+        // Init Supabase if configured
+        if (SUPABASE_URL !== 'https://orryroqxvlqaiejaxnng.supabase.co' && typeof supabase !== 'undefined') {
+            supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+            checkSession();
+        } else {
+            console.log('Supabase belum dikonfigurasi atau script gagal dimuat.');
+        }
+
+        async function checkSession() {
+            if(!supabaseClient) return;
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session) {
+                currentUser = session.user;
+                updateAuthUI(true);
+                loadCloudProgress(); // Load data from DB
+            } else {
+                updateAuthUI(false);
+            }
+
+            supabaseClient.auth.onAuthStateChange((_event, session) => {
+                if (session) {
+                    currentUser = session.user;
+                    updateAuthUI(true);
+                    loadCloudProgress();
+                } else {
+                    currentUser = null;
+                    updateAuthUI(false);
+                }
+            });
+        }
+
+        function updateAuthUI(isLoggedIn) {
+            const btn = document.getElementById('headerAuthBtn');
+            if(isLoggedIn) {
+                btn.innerText = "Logout";
+                btn.classList.add('logged-in');
+                btn.onclick = handleLogout;
+            } else {
+                btn.innerText = "Login";
+                btn.classList.remove('logged-in');
+                btn.onclick = openAuthModal;
+            }
+        }
+
+        function openAuthModal() { document.getElementById('auth-modal').classList.add('show'); }
+        function closeAuthModal() { document.getElementById('auth-modal').classList.remove('show'); document.getElementById('auth-msg').innerText = ''; }
+
+        async function handleLogin() {
+            if(!supabaseClient) return alert('Konfigurasi Supabase belum diisi!');
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            const msg = document.getElementById('auth-msg');
+            
+            msg.innerText = "Proses login...";
+            const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+            if (error) msg.innerText = "Error: " + error.message;
+            else { closeAuthModal(); }
+        }
+
+        async function handleSignup() {
+            if(!supabaseClient) return alert('Konfigurasi Supabase belum diisi!');
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            const msg = document.getElementById('auth-msg');
+
+            msg.innerText = "Proses daftar...";
+            const { error } = await supabaseClient.auth.signUp({ email, password });
+            if (error) msg.innerText = "Error: " + error.message;
+            else { msg.innerText = "Sukses! Silakan cek email untuk konfirmasi (jika perlu) atau login."; }
+        }
+
+        async function handleLogout() {
+            if(!supabaseClient) return;
+            await supabaseClient.auth.signOut();
+            alert("Anda telah logout.");
+            // Optional: Clear local state or keep it?
+            // For now, let's just keep local state active
+        }
+
+        // === SYNC LOGIC ===
+        async function loadCloudProgress() {
+            if(!currentUser || !supabaseClient) return;
+            
+            // Fetch data from user_progress table
+            const { data, error } = await supabaseClient
+                .from('user_progress')
+                .select('*')
+                .eq('user_id', currentUser.id)
+                .single();
+
+            if (data) {
+                // Merge or Replace? Let's Merge for safety, prioritizing Cloud
+                if (data.vocab_data) {
+                    vKnown = { ...vKnown, ...data.vocab_data };
+                    localStorage.setItem('knownVocabMap', JSON.stringify(vKnown));
+                }
+                if (data.kanji_data) {
+                    kKnown = { ...kKnown, ...data.kanji_data };
+                    localStorage.setItem('knownKanjiMap', JSON.stringify(kKnown));
+                }
+                
+                // Refresh UI
+                if(currentTab === 'kanji') renderHeatmap();
+                if(currentTab === 'vocab') { updateVocabKnownBtn(); }
+                console.log("Progress loaded from Cloud");
+            } else {
+                // No data yet, maybe init?
+                console.log("No cloud data found, initializing...");
+                saveCloudProgress();
+            }
+        }
+
+        let saveTimeout = null;
+        function triggerSave() {
+            if (!currentUser || !supabaseClient) return;
+            // Debounce save (wait 2 seconds after last action)
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(saveCloudProgress, 2000);
+        }
+
+        async function saveCloudProgress() {
+            if (!currentUser || !supabaseClient) return;
+            
+            const payload = {
+                user_id: currentUser.id,
+                vocab_data: vKnown,
+                kanji_data: kKnown
+            };
+
+            const { error } = await supabaseClient
+                .from('user_progress')
+                .upsert(payload);
+
+            if (error) console.error("Save Failed:", error.message);
+            else console.log("Progress saved to Cloud");
+        }
+
+        // ============================================
+        // EXISTING APP LOGIC
+        // ============================================
+
+        const transCache = {};
+        let currentTab = 'vocab';
+        let theme = localStorage.getItem('theme') || 'light';
+        
+        if (theme === 'dark') document.body.setAttribute('data-theme', 'dark');
+        updateThemeIcon();
+
+        function toggleTheme() {
+            theme = theme === 'light' ? 'dark' : 'light';
+            document.body.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            updateThemeIcon();
+            if(currentTab==='vocab') resizeVocabCanvas();
+        }
+
+        function updateThemeIcon() {
+            const btn = document.getElementById('themeBtn');
+            if (theme === 'dark') {
+                btn.innerHTML = '<img src="img/sun.svg" alt="Light" class="theme-icon-img">';
+            } else {
+                btn.innerHTML = '<img src="img/moon.svg" alt="Dark" class="theme-icon-img">';
+            }
+        }
+
+        function setTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            if (tab === 'vocab') {
+                document.getElementById('vocab-section').classList.add('active');
+                setTimeout(resizeVocabCanvas, 50);
+            } else {
+                document.getElementById('kanji-section').classList.add('active');
+            }
+        }
+
+        const vCanvas = document.getElementById('vocabCanvas');
+        const vCtx = vCanvas.getContext('2d');
+        let vList = [];
+        let vIndex = 0;
+        let vLevel = '';
+        let vFlip = false; 
+        let vAnim = 0; 
+        let vTarget = 0;
+        let vKnown = JSON.parse(localStorage.getItem('knownVocabMap')) || {}; 
+        let isRandomMode = false;
+        let isTTSOn = false;
+        let isFilterMode = false; 
+        let isAutoMode = false;
+        let autoTimer = null;
+        let kanjiHitboxes = []; 
+        let shuffledIndices = []; 
+
+        function resizeVocabCanvas() {
+            const parent = vCanvas.parentElement;
+            if(!parent) return;
+            const dpr = window.devicePixelRatio || 1;
+            const rect = parent.getBoundingClientRect();
+            vCanvas.width = rect.width * dpr;
+            vCanvas.height = rect.height * dpr;
+            vCtx.scale(dpr, dpr);
+            vCanvas.logicalW = rect.width;
+            vCanvas.logicalH = rect.height;
+            if (vList.length > 0) drawCard();
+        }
+        window.addEventListener('resize', resizeVocabCanvas);
+
+        async function loadVocab(lvl) {
+            const status = document.getElementById('vocab-msg');
+            const area = document.getElementById('vocab-canvas-area'); 
+            stopAutoPlay(); 
+            document.querySelectorAll('#vocab-levels .lvl-btn').forEach(b => {
+                b.classList.remove('active');
+                if(b.innerText.toLowerCase() === lvl) b.classList.add('active');
+            });
+            if(area) area.style.display = 'none';
+            status.innerHTML = '<div class="loader"></div> Memuat JSON...';
+            try {
+                const res = await fetch(`data/${lvl}.json`);
+                if(!res.ok) throw new Error("Gagal load file JSON.");
+                const data = await res.json();
+                if (data.words) {
+                    vList = data.words;
+                    vLevel = lvl.toUpperCase();
+                    vIndex = 0; vFlip = false; vTarget = 0; vAnim = 0;
+                    isFilterMode = false; updateFilterBtn();
+                    initIndices();
+                    if(area) area.style.display = 'block';
+                    updateStatusMsg(); updateVocabKnownBtn(); resizeVocabCanvas();
+                    if(getCurrentIndex() !== -1) translateMeaning(getCurrentIndex());
+                }
+            } catch(e) { status.innerHTML = `<span style="color:red">${e.message}</span>`; }
+        }
+
+        function initIndices() {
+            let tempIndices = [];
+            for(let i=0; i<vList.length; i++) {
+                if (isFilterMode) { if (!vKnown[vList[i].word]) tempIndices.push(i); } 
+                else { tempIndices.push(i); }
+            }
+            shuffledIndices = tempIndices;
+            if(isRandomMode) shuffleArray(shuffledIndices);
+            vIndex = 0;
+            updateStatusMsg();
+        }
+
+        function getCurrentIndex() {
+            if(shuffledIndices.length === 0) return -1;
+            return shuffledIndices[vIndex];
+        }
+        
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        function updateStatusMsg() {
+            const status = document.getElementById('vocab-msg');
+            const remain = shuffledIndices.length;
+            const total = vList.length;
+            let text = `Level ${vLevel}: Total ${total} kata.`;
+            if (isFilterMode) text += ` (Filter Aktif: ${remain} kata)`;
+            status.innerText = text;
+            status.style.color = '#27ae60';
+        }
+
+        function drawCard() {
+            const w = vCanvas.logicalW;
+            const h = vCanvas.logicalH;
+            vCtx.clearRect(0, 0, w, h);
+
+            const isDark = document.body.getAttribute('data-theme') === 'dark';
+            const textCol = isDark ? '#f5f6fa' : '#2d3436';
+            const cardBackBg = isDark ? '#3d3d3d' : '#fff5f5';
+            const cardFrontBg = isDark ? '#2d2d2d' : '#fff';
+
+            if(shuffledIndices.length === 0) {
+                vCtx.font = "bold 1.2rem Arial"; vCtx.fillStyle = textCol; vCtx.textAlign = "center";
+                vCtx.fillText(isFilterMode ? "Semua kata sudah dihafal!" : "Tidak ada data.", w/2, h/2);
+                return;
+            }
+            const dataIdx = getCurrentIndex();
+            const item = vList[dataIdx];
+            if(Math.abs(vTarget - vAnim) > 0.01) { vAnim += (vTarget - vAnim) * 0.2; requestAnimationFrame(drawCard); } 
+            else { vAnim = vTarget; }
+            let scaleX = 1; let isBack = false;
+            if(vAnim <= 0.5) { scaleX = 1 - (vAnim * 2); isBack = false; } else { scaleX = (vAnim - 0.5) * 2; isBack = true; }
+            vCtx.save(); vCtx.translate(w/2, h/2); vCtx.scale(scaleX, 1); vCtx.translate(-w/2, -h/2);
+            vCtx.beginPath(); vCtx.roundRect(0, 0, w, h, 20); vCtx.fillStyle = isBack ? cardBackBg : cardFrontBg;
+            vCtx.fill(); vCtx.lineWidth = 3; vCtx.strokeStyle = isBack ? '#ff7675' : (isDark ? '#444' : '#eee'); vCtx.stroke();
+            vCtx.textAlign = "center"; vCtx.textBaseline = "middle";
+
+            if(!isBack) {
+                const text = item.word;
+                let fontSize = w < 350 ? 50 : 70;
+                vCtx.font = `bold ${fontSize}px "Noto Sans JP", sans-serif`;
+                let totalTextWidth = 0;
+                for (let char of text) { totalTextWidth += vCtx.measureText(char).width; }
+                
+                const maxW = w - 80; 
+                if (totalTextWidth > maxW) {
+                    const scaleFactor = maxW / totalTextWidth;
+                    fontSize = Math.floor(fontSize * scaleFactor);
+                    vCtx.font = `bold ${fontSize}px "Noto Sans JP", sans-serif`;
+                    totalTextWidth = 0;
+                    for (let char of text) { totalTextWidth += vCtx.measureText(char).width; }
+                }
+                
+                let startX = (w - totalTextWidth) / 2;
+                let startY = h / 2;
+                kanjiHitboxes = []; 
+                for (let i = 0; i < text.length; i++) {
+                    const char = text[i];
+                    const charW = vCtx.measureText(char).width;
+                    const isKanji = char.match(/[\u4e00-\u9faf]/);
+                    if (isKanji) {
+                        vCtx.fillStyle = "#ff7675"; 
+                        kanjiHitboxes.push({char, x: startX, y: startY - fontSize/2, w: charW, h: fontSize});
+                    } else { vCtx.fillStyle = textCol; }
+                    vCtx.textAlign = "left"; 
+                    vCtx.fillText(char, startX, startY);
+                    vCtx.textAlign = "center"; 
+                    startX += charW;
+                }
+                
+                vCtx.fillStyle = isDark ? '#888' : '#ccc'; 
+                vCtx.font = "bold 1rem Arial";
+                vCtx.textAlign = "left"; vCtx.fillText(vLevel, 30, 40);
+                vCtx.textAlign = "right"; vCtx.fillText(`${vIndex + 1} / ${shuffledIndices.length}`, w - 30, 40);
+                if(vKnown[item.word]) {
+                    vCtx.fillStyle = "#55efc4"; vCtx.font = "bold 2rem Arial"; vCtx.fillText("✔", w - 40, h - 40);
+                }
+            } else {
+                vCtx.textAlign = "center";
+                vCtx.fillStyle = textCol;
+                vCtx.font = "bold 2rem 'Noto Sans JP', sans-serif";
+                vCtx.fillText(item.furigana || item.word, w/2, h/2 - 60);
+
+                vCtx.fillStyle = "#aaa";
+                vCtx.font = "14px sans-serif";
+                const roma = (item.romaji || "").toUpperCase();
+                vCtx.fillText(roma, w/2, h/2 - 30);
+
+                vCtx.beginPath(); vCtx.moveTo(w * 0.2, h/2 - 10); vCtx.lineTo(w * 0.8, h/2 - 10);
+                vCtx.strokeStyle = "#eee"; vCtx.lineWidth = 2; vCtx.stroke();
+
+                vCtx.fillStyle = "#888";
+                vCtx.font = "italic 16px sans-serif";
+                const engMeaning = item.meaning || "";
+                let engY = h/2 + 20;
+                const engWords = engMeaning.split(' ');
+                let engLine = '';
+                for(let n = 0; n < engWords.length; n++) {
+                    let testLine = engLine + engWords[n] + ' ';
+                    if (vCtx.measureText(testLine).width > w * 0.85 && n > 0) {
+                        vCtx.fillText(engLine, w/2, engY); engLine = engWords[n] + ' '; engY += 20;
+                    } else { engLine = testLine; }
+                }
+                vCtx.fillText(engLine, w/2, engY);
+
+                vCtx.fillStyle = "#ff7675";
+                vCtx.font = "bold 20px sans-serif";
+                const indoMeaning = item.meaning_id || "...";
+                let indoY = engY + 35; 
+                const indoWords = indoMeaning.split(' ');
+                let indoLine = '';
+                for(let n = 0; n < indoWords.length; n++) {
+                    let testLine = indoLine + indoWords[n] + ' ';
+                    if (vCtx.measureText(testLine).width > w * 0.85 && n > 0) {
+                        vCtx.fillText(indoLine, w/2, indoY); indoLine = indoWords[n] + ' '; indoY += 28;
+                    } else { indoLine = testLine; }
+                }
+                vCtx.fillText(indoLine, w/2, indoY);
+            }
+            vCtx.restore();
+        }
+
+        vCanvas.addEventListener('click', (e) => {
+            if (shuffledIndices.length === 0) return;
+            const rect = vCanvas.getBoundingClientRect();
+            const scaleX = vCanvas.logicalW / rect.width;
+            const scaleY = vCanvas.logicalH / rect.height;
+            const clickX = (e.clientX - rect.left) * scaleX;
+            const clickY = (e.clientY - rect.top) * scaleY;
+            if (!vFlip) {
+                for (let box of kanjiHitboxes) {
+                    if (clickX >= box.x && clickX <= box.x + box.w && clickY >= box.y && clickY <= box.y + box.h) {
+                        if(isAutoMode) stopAutoPlay();
+                        openModal(box.char);
+                        return; 
+                    }
+                }
+            }
+            if(isAutoMode) stopAutoPlay();
+            flipCard();
+        });
+        
+        function flipCard() { 
+            vFlip = !vFlip; vTarget = vFlip ? 1 : 0; drawCard(); 
+            if(isTTSOn && vFlip) speakDefinition(); 
+        }
+
+        function nextCard() { if(isAutoMode) stopAutoPlay(); if(vIndex < shuffledIndices.length -1) { vIndex++; resetCard(); } }
+        function prevCard() { if(isAutoMode) stopAutoPlay(); if(vIndex > 0) { vIndex--; resetCard(); } }
+        
+        function toggleRandom() {
+            stopAutoPlay(); isRandomMode = !isRandomMode;
+            const btn = document.getElementById('btn-random');
+            if(isRandomMode) { btn.classList.add('active-toggle'); shuffleArray(shuffledIndices); }
+            else { btn.classList.remove('active-toggle'); shuffledIndices.sort((a, b) => a - b); }
+            vIndex = 0; resetCard();
+        }
+
+        function toggleFilter() {
+            stopAutoPlay(); isFilterMode = !isFilterMode; updateFilterBtn();
+            initIndices(); resetCard();
+        }
+        function updateFilterBtn() {
+            const btn = document.getElementById('btn-filter');
+            if(isFilterMode) btn.classList.add('filter-active'); else btn.classList.remove('filter-active');
+        }
+        
+        function resetCard() {
+            vFlip = false; vTarget = 0; vAnim = 0; updateVocabKnownBtn();
+            drawCard(); translateMeaning(getCurrentIndex());
+        }
+
+        function toggleTTS() {
+            isTTSOn = !isTTSOn;
+            const btn = document.getElementById('btn-tts');
+            if(isTTSOn) btn.classList.add('tts-active'); else btn.classList.remove('tts-active');
+        }
+
+        function speakDefinition() {
+            const idx = getCurrentIndex();
+            if(idx === -1 || !vList[idx]) return;
+            const text = vList[idx].furigana || vList[idx].word;
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = 'ja-JP'; utter.rate = 0.6; 
+            window.speechSynthesis.speak(utter);
+        }
+
+        function openAutoSettings() {
+            if(isAutoMode) { stopAutoPlay(); return; }
+            document.getElementById('auto-modal').classList.add('show');
+        }
+        function closeAutoSettings() { document.getElementById('auto-modal').classList.remove('show'); }
+        function startAutoPlay() {
+            closeAutoSettings();
+            const speed = parseInt(document.getElementById('speed-range').value) * 1000;
+            isAutoMode = true;
+            document.getElementById('btn-auto').classList.add('auto-active');
+            document.getElementById('btn-auto').innerHTML = '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+            runAutoSequence(speed);
+        }
+        function stopAutoPlay() {
+            isAutoMode = false; clearTimeout(autoTimer);
+            document.getElementById('btn-auto').classList.remove('auto-active');
+            document.getElementById('btn-auto').innerHTML = '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+        }
+
+        function runAutoSequence(speed) {
+            if(!isAutoMode) return;
+            autoTimer = setTimeout(() => {
+                if(!isAutoMode) return;
+                vFlip = true; vTarget = 1; drawCard();
+                speakDefinition();
+                setTimeout(() => {
+                    if(!isAutoMode) return;
+                     setTimeout(() => {
+                        if(!isAutoMode) return;
+                        if(vIndex < shuffledIndices.length - 1) {
+                            vIndex++; vFlip = false; vTarget = 0; vAnim = 0;
+                            updateVocabKnownBtn(); drawCard();
+                            translateMeaning(getCurrentIndex());
+                            runAutoSequence(speed);
+                        } else { stopAutoPlay(); }
+                     }, 1500);
+                }, 1000); 
+            }, speed);
+        }
+
+        function toggleVocabKnown() {
+            const idx = getCurrentIndex();
+            if(idx === -1) return;
+            const word = vList[idx].word;
+            if(vKnown[word]) delete vKnown[word]; else vKnown[word] = true;
+            localStorage.setItem('knownVocabMap', JSON.stringify(vKnown));
+            
+            // Trigger save to cloud
+            triggerSave();
+
+            if(isFilterMode && vKnown[word]) {
+                shuffledIndices.splice(vIndex, 1);
+                if(vIndex >= shuffledIndices.length) vIndex = Math.max(0, shuffledIndices.length - 1);
+                updateStatusMsg();
+            }
+            updateVocabKnownBtn(); drawCard(); 
+        }
+        
+        function updateVocabKnownBtn() {
+            const btn = document.getElementById('btn-vocab-known');
+            const idx = getCurrentIndex();
+            if(idx === -1) return;
+            const word = vList[idx].word;
+            if(vKnown[word]) { btn.innerText = "Batal Hafal"; btn.classList.add('is-known'); } 
+            else { btn.innerText = "Tandai Sudah Hafal"; btn.classList.remove('is-known'); }
+        }
+
+        function openKnownList() {
+            if(isAutoMode) stopAutoPlay();
+            const listContent = document.getElementById('known-list-content');
+            listContent.innerHTML = '';
+            const knownItems = vList.filter(item => vKnown[item.word]);
+            if(knownItems.length === 0) {
+                listContent.innerHTML = '<div style="text-align:center; padding:20px; opacity:0.6;">Belum ada kata yang ditandai hafal di level ini.</div>';
+            } else {
+                knownItems.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'known-list-item';
+                    div.innerHTML = `
+                        <div class="k-word-col">
+                            <div class="k-word">${item.word}</div>
+                            <div class="k-furi">(${item.furigana || ''})</div>
+                            <div class="k-mean">${item.meaning_id || item.meaning}</div>
+                        </div>
+                        <button class="del-btn" onclick="removeKnown('${item.word}')">×</button>
+                    `;
+                    listContent.appendChild(div);
+                });
+            }
+            document.getElementById('list-modal').classList.add('show');
+        }
+
+        function removeKnown(word) {
+            if(vKnown[word]) {
+                delete vKnown[word];
+                localStorage.setItem('knownVocabMap', JSON.stringify(vKnown));
+                // Trigger save to cloud
+                triggerSave();
+
+                openKnownList(); 
+                const idx = getCurrentIndex();
+                if(idx !== -1 && vList[idx].word === word) { updateVocabKnownBtn(); drawCard(); }
+                if(isFilterMode) { initIndices(); resetCard(); }
+            }
+        }
+        function closeListModal() { document.getElementById('list-modal').classList.remove('show'); }
+
+        let kList = [];
+        let kKnown = JSON.parse(localStorage.getItem('knownKanjiMap')) || {};
+        let kCurrentChar = '';
+        const kGrid = document.getElementById('kanji-grid');
+
+        async function loadKanjiData(level) {
+            document.querySelectorAll('#kanji-levels .lvl-btn').forEach(b => {
+                b.classList.remove('active');
+                if(b.innerText.toLowerCase() === level) b.classList.add('active');
+            });
+            kGrid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px;"><div class="loader"></div> Memuat Data...</div>';
+            const suffix = level.replace('n', ''); 
+            const urlUser = `https://kanjiapi.dev/v1/kanji/jlpt-${suffix}`;
+            const urlStd = `https://kanjiapi.dev/v1/kanji/jlpt/${level}`;
+            try {
+                let res = await fetch(urlUser);
+                if(!res.ok) { res = await fetch(urlStd); if(!res.ok) throw new Error("API Error"); }
+                kList = await res.json(); renderHeatmap();
+            } catch(e) { kGrid.innerHTML = `<div style="grid-column:1/-1; text-align:center; color:red;">Gagal memuat data.</div>`; }
+        }
+
+        function renderHeatmap() {
+            kGrid.innerHTML = ''; let count = 0;
+            kList.forEach(char => {
+                const div = document.createElement('div');
+                div.className = 'k-box'; div.innerText = char; div.id = `k-${char}`;
+                if(kKnown[char]) { div.classList.add('known'); count++; }
+                div.onclick = () => openModal(char);
+                div.oncontextmenu = (e) => { e.preventDefault(); toggleKanji(char); };
+                kGrid.appendChild(div);
+            });
+            updateStats(count);
+        }
+
+        function toggleKanji(char) {
+            if(kKnown[char]) delete kKnown[char]; else kKnown[char] = true;
+            localStorage.setItem('knownKanjiMap', JSON.stringify(kKnown));
+            
+            // Trigger save to cloud
+            triggerSave();
+
+            if(currentTab === 'kanji') updateStats(Object.keys(kKnown).filter(k => kList.includes(k)).length);
+            if(kCurrentChar === char) updateModalBtn();
+            const el = document.getElementById(`k-${char}`);
+            if(el) { if(kKnown[char]) el.classList.add('known'); else el.classList.remove('known'); }
+        }
+
+        function updateStats(n) {
+            document.getElementById('k-count').innerText = n;
+            document.getElementById('k-total').innerText = kList.length;
+            const pct = kList.length ? (n / kList.length) * 100 : 0;
+            document.getElementById('k-progress').style.width = pct + '%';
+        }
+
+        async function translateText(txt) {
+            if(!txt) return "";
+            if(transCache[txt]) return transCache[txt];
+            try {
+                const u = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=id&dt=t&q=${encodeURI(txt)}`;
+                const r = await fetch(u); const d = await r.json();
+                const res = d[0].map(x=>x[0]).join(''); const final = res.charAt(0).toUpperCase() + res.slice(1);
+                transCache[txt] = final; return final;
+            } catch { return null; }
+        }
+
+        async function translateMeaning(idx) {
+            const realIdx = getCurrentIndex();
+            if(realIdx === -1) return;
+            const item = vList[realIdx];
+            if(!item || item.meaning_id) return;
+            const m = await translateText(item.meaning);
+            item.meaning_id = m || item.meaning;
+            if(realIdx === getCurrentIndex()) drawCard();
+        }
+
+        async function openModal(char) {
+            if(isAutoMode) stopAutoPlay();
+            kCurrentChar = char;
+            const m = document.getElementById('modal');
+            m.classList.add('show');
+            document.getElementById('m-char').innerText = char;
+            document.getElementById('m-mean').innerText = "...";
+            document.getElementById('m-mean-en').innerText = "";
+            
+            document.getElementById('m-kun').innerHTML = "-";
+            document.getElementById('m-on').innerHTML = "-";
+            
+            updateModalBtn();
+
+            try {
+                const r = await fetch(`https://kanjiapi.dev/v1/kanji/${char}`);
+                const d = await r.json();
+                
+                if(d.kun_readings.length > 0) {
+                    document.getElementById('m-kun').innerHTML = 
+                        d.kun_readings.map(r => `<div class="reading-item">${r}</div>`).join('');
+                }
+                if(d.on_readings.length > 0) {
+                    document.getElementById('m-on').innerHTML = 
+                        d.on_readings.map(r => `<div class="reading-item">${r}</div>`).join('');
+                }
+                
+                const eng = d.meanings.slice(0,3).join(', ');
+                document.getElementById('m-mean-en').innerText = eng;
+                const indo = await translateText(eng);
+                document.getElementById('m-mean').innerText = indo || eng;
+            } catch { document.getElementById('m-mean').innerText = "Gagal memuat"; }
+        }
+
+        function closeModal() { document.getElementById('modal').classList.remove('show'); }
+        function updateModalBtn() {
+            const btn = document.getElementById('m-btn');
+            if(kKnown[kCurrentChar]) { btn.innerText = "Sudah Hafal (Batal)"; btn.classList.add('is-known'); } 
+            else { btn.innerText = "Tandai Sudah Hafal"; btn.classList.remove('is-known'); }
+        }
+        function toggleKnownFromModal() { toggleKanji(kCurrentChar); }
+
+        document.addEventListener('keydown', e => {
+            if(currentTab === 'vocab') {
+                if(e.key === ' ' || e.key === 'Enter') flipCard();
+                if(e.key === 'ArrowRight') nextCard();
+                if(e.key === 'ArrowLeft') prevCard();
+            }
+        });
+
+        resizeVocabCanvas();
+    </script>
+</body>
+</html>
