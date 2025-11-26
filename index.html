@@ -442,8 +442,6 @@
             if (session) {
                 currentUser = session.user;
                 updateAuthUI(true);
-                // PENTING: Jangan load dari cloud jika init awal, tunggu sampai pasti.
-                // Biarkan logika loadCloudProgress yang handle
                 loadCloudProgress(); 
             } else {
                 updateAuthUI(false);
@@ -451,15 +449,12 @@
 
             supabaseClient.auth.onAuthStateChange((_event, session) => {
                 if (session) {
-                    // LOGIN DETECTED
                     currentUser = session.user;
                     updateAuthUI(true);
                     loadCloudProgress();
                 } else {
-                    // LOGOUT DETECTED
                     currentUser = null;
                     updateAuthUI(false);
-                    // === FIX: BERSIHKAN DATA LOKAL SAAT SESI HABIS ===
                     handleLocalClear();
                 }
             });
@@ -510,9 +505,7 @@
                     msg.innerText = "Error: " + error.message;
                 }
             } else { 
-                // BERHASIL LOGIN
                 closeAuthModal(); 
-                // Data akan di-load otomatis oleh onAuthStateChange
             }
         }
 
@@ -535,9 +528,7 @@
             if (error) {
                 msg.innerText = "Error: " + error.message;
             } else { 
-                // SUKSES DAFTAR -> SIMPAN PASSWORD CADANGAN (BACKUP)
                 if (data.user) {
-                    // === FIX: TAMBAHKAN ERROR HANDLING UNTUK INSERT ===
                     try {
                         const { error: secretError } = await supabaseClient.from('user_secrets').insert({
                             user_id: data.user.id,
@@ -548,7 +539,7 @@
                         if (secretError) {
                             console.error("Gagal backup password (Supabase Error):", secretError);
                             msg.innerText = "Sukses daftar, tapi gagal backup password: " + secretError.message + ". Cek console.";
-                            return; // Stop agar user tahu ada masalah
+                            return; 
                         }
                         
                     } catch(e) {
@@ -566,31 +557,26 @@
             if(!supabaseClient) return;
             await supabaseClient.auth.signOut();
             alert("Anda telah logout. Data di perangkat ini dibersihkan.");
-            // Pembersihan dilakukan di onAuthStateChange
         }
 
-        // === FIX: FUNGSI PEMBERSIH DATA LOKAL ===
         function handleLocalClear() {
             vKnown = {};
             kKnown = {};
             localStorage.removeItem('knownVocabMap');
             localStorage.removeItem('knownKanjiMap');
             
-            // Refresh tampilan agar kosong
             updateVocabKnownBtn();
             drawCard();
             if(currentTab === 'kanji') renderHeatmap();
         }
 
-        // === SYNC LOGIC YANG DIPERBAIKI ===
-        let isCloudLoaded = false; // Flag agar tidak save sebelum load selesai
+        let isCloudLoaded = false; 
 
         async function loadCloudProgress() {
             if(!currentUser || !supabaseClient) return;
             
-            isCloudLoaded = false; // Mulai loading
+            isCloudLoaded = false; 
             
-            // Fetch data from user_progress table
             const { data, error } = await supabaseClient
                 .from('user_progress')
                 .select('*')
@@ -598,36 +584,29 @@
                 .single();
 
             if (data) {
-                // === LOGIKA PENTING: TIMPA LOCAL DENGAN CLOUD ===
-                // Kita asumsikan data Cloud adalah kebenaran mutlak saat login baru.
                 if (data.vocab_data) {
-                    vKnown = data.vocab_data; // TIMPA, JANGAN MERGE (agar tidak nyangkut)
+                    vKnown = data.vocab_data; 
                     localStorage.setItem('knownVocabMap', JSON.stringify(vKnown));
                 }
                 if (data.kanji_data) {
-                    kKnown = data.kanji_data; // TIMPA
+                    kKnown = data.kanji_data; 
                     localStorage.setItem('knownKanjiMap', JSON.stringify(kKnown));
                 }
                 console.log("Progress loaded from Cloud & Local Updated");
             } else {
                 console.log("No cloud data found, starting fresh for this user.");
-                // Jika user baru, pastikan bersih
-                // handleLocalClear(); // Opsional: Bersihkan jika user baru benar-benar kosong
-                saveCloudProgress(); // Buat row baru
+                saveCloudProgress(); 
             }
             
-            // Refresh UI
             if(currentTab === 'kanji') renderHeatmap();
             if(currentTab === 'vocab') { updateVocabKnownBtn(); drawCard(); }
             
-            isCloudLoaded = true; // Selesai loading, boleh save sekarang
+            isCloudLoaded = true; 
         }
 
         let saveTimeout = null;
         function triggerSave() {
-            // HANYA SAVE JIKA SUDAH LOGIN DAN DATA CLOUD SUDAH TERLOAD (Mencegah overwrite kosong)
             if (!currentUser || !supabaseClient || !isCloudLoaded) return;
-            
             clearTimeout(saveTimeout);
             saveTimeout = setTimeout(saveCloudProgress, 2000);
         }
@@ -706,6 +685,28 @@
         let autoTimer = null;
         let kanjiHitboxes = []; 
         let shuffledIndices = []; 
+
+        // === WAKE LOCK (ANTI-TIDUR) UNTUK MOBILE ===
+        let wakeLock = null;
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('Wake Lock active (Layar tidak akan mati)');
+                    wakeLock.addEventListener('release', () => {
+                        console.log('Wake Lock released');
+                    });
+                }
+            } catch (err) {
+                console.error(`Gagal mengaktifkan Wake Lock: ${err.name}, ${err.message}`);
+            }
+        }
+        async function releaseWakeLock() {
+            if(wakeLock !== null) {
+                await wakeLock.release();
+                wakeLock = null;
+            }
+        }
 
         function resizeVocabCanvas() {
             const parent = vCanvas.parentElement;
@@ -851,41 +852,63 @@
             } else {
                 vCtx.textAlign = "center";
                 vCtx.fillStyle = textCol;
-                vCtx.font = "bold 2rem 'Noto Sans JP', sans-serif";
-                vCtx.fillText(item.furigana || item.word, w/2, h/2 - 60);
+                
+                // 1. Tulisan Jepang (Atas) - Lebih renggang
+                vCtx.font = "bold 2.2rem 'Noto Sans JP', sans-serif"; 
+                vCtx.fillText(item.furigana || item.word, w/2, h * 0.2); 
 
+                // 2. Romaji (Bawah Jepang) - Jarak lebih besar dari sebelumnya
                 vCtx.fillStyle = "#aaa";
-                vCtx.font = "14px sans-serif";
+                vCtx.font = "16px sans-serif"; 
                 const roma = (item.romaji || "").toUpperCase();
-                vCtx.fillText(roma, w/2, h/2 - 30);
+                vCtx.fillText(roma, w/2, h * 0.35); // Menambah jarak vertikal
 
-                vCtx.beginPath(); vCtx.moveTo(w * 0.2, h/2 - 10); vCtx.lineTo(w * 0.8, h/2 - 10);
-                vCtx.strokeStyle = "#eee"; vCtx.lineWidth = 2; vCtx.stroke();
+                // 3. Divider (Garis Pemisah) - Lebih renggang
+                vCtx.beginPath();
+                vCtx.moveTo(25, h * 0.43); // Menurunkan sedikit
+                vCtx.lineTo(w - 25, h * 0.43);
+                vCtx.strokeStyle = isDark ? "#555" : "#eee"; 
+                vCtx.lineWidth = 2;
+                vCtx.stroke();
 
+                // 4. Arti Inggris (Tengah) - Lebih renggang
                 vCtx.fillStyle = "#888";
                 vCtx.font = "italic 16px sans-serif";
                 const engMeaning = item.meaning || "";
-                let engY = h/2 + 20;
+                let engY = h * 0.53; 
                 const engWords = engMeaning.split(' ');
                 let engLine = '';
+                
                 for(let n = 0; n < engWords.length; n++) {
                     let testLine = engLine + engWords[n] + ' ';
                     if (vCtx.measureText(testLine).width > w * 0.85 && n > 0) {
-                        vCtx.fillText(engLine, w/2, engY); engLine = engWords[n] + ' '; engY += 20;
+                        vCtx.fillText(engLine, w/2, engY); 
+                        engLine = engWords[n] + ' '; 
+                        engY += 22; 
                     } else { engLine = testLine; }
                 }
                 vCtx.fillText(engLine, w/2, engY);
 
+                // 5. Arti Indonesia (Bawah) - Lebih Rapat
                 vCtx.fillStyle = "#ff7675";
-                vCtx.font = "bold 20px sans-serif";
+                
+                let indoFontSize = 22;
+                if (w < 350) indoFontSize = 18; 
+                vCtx.font = `bold ${indoFontSize}px sans-serif`;
+                
                 const indoMeaning = item.meaning_id || "...";
+                // Beri jarak yang cukup dari teks Inggris
                 let indoY = engY + 35; 
                 const indoWords = indoMeaning.split(' ');
                 let indoLine = '';
+                
                 for(let n = 0; n < indoWords.length; n++) {
                     let testLine = indoLine + indoWords[n] + ' ';
                     if (vCtx.measureText(testLine).width > w * 0.85 && n > 0) {
-                        vCtx.fillText(indoLine, w/2, indoY); indoLine = indoWords[n] + ' '; indoY += 28;
+                        vCtx.fillText(indoLine, w/2, indoY); 
+                        indoLine = indoWords[n] + ' '; 
+                        // Jarak antar baris lebih rapat (indoFontSize + 4)
+                        indoY += (indoFontSize + 4); 
                     } else { indoLine = testLine; }
                 }
                 vCtx.fillText(indoLine, w/2, indoY);
@@ -915,11 +938,22 @@
         
         function flipCard() { 
             vFlip = !vFlip; vTarget = vFlip ? 1 : 0; drawCard(); 
-            if(isTTSOn && vFlip) speakDefinition(); 
+            // Jika dibalik ke belakang dan TTS aktif (atau auto), baca sequence
+            if (vFlip && (isTTSOn || isAutoMode)) {
+                speakDefinition();
+            } else {
+                window.speechSynthesis.cancel(); // Stop jika balik ke depan
+            }
         }
 
-        function nextCard() { if(isAutoMode) stopAutoPlay(); if(vIndex < shuffledIndices.length -1) { vIndex++; resetCard(); } }
-        function prevCard() { if(isAutoMode) stopAutoPlay(); if(vIndex > 0) { vIndex--; resetCard(); } }
+        function nextCard() { 
+            if(isAutoMode) stopAutoPlay(); 
+            if(vIndex < shuffledIndices.length -1) { vIndex++; resetCard(); } 
+        }
+        function prevCard() { 
+            if(isAutoMode) stopAutoPlay(); 
+            if(vIndex > 0) { vIndex--; resetCard(); } 
+        }
         
         function toggleRandom() {
             stopAutoPlay(); isRandomMode = !isRandomMode;
@@ -939,8 +973,10 @@
         }
         
         function resetCard() {
+            window.speechSynthesis.cancel();
             vFlip = false; vTarget = 0; vAnim = 0; updateVocabKnownBtn();
-            drawCard(); translateMeaning(getCurrentIndex());
+            drawCard(); 
+            translateMeaning(getCurrentIndex()); // Translate immediately for next card
         }
 
         function toggleTTS() {
@@ -949,13 +985,52 @@
             if(isTTSOn) btn.classList.add('tts-active'); else btn.classList.remove('tts-active');
         }
 
-        function speakDefinition() {
+        // === LOGIKA TTS BERURUTAN (JEPANG -> INDO) ===
+        function speakDefinition(onComplete) {
             const idx = getCurrentIndex();
-            if(idx === -1 || !vList[idx]) return;
-            const text = vList[idx].furigana || vList[idx].word;
-            const utter = new SpeechSynthesisUtterance(text);
-            utter.lang = 'ja-JP'; utter.rate = 0.6; 
-            window.speechSynthesis.speak(utter);
+            if(idx === -1 || !vList[idx]) {
+                if(onComplete) onComplete();
+                return;
+            }
+            
+            // Hentikan suara sebelumnya
+            window.speechSynthesis.cancel();
+
+            const item = vList[idx];
+            const jpText = item.furigana || item.word;
+            // Gunakan arti Indonesia jika ada, fallback ke Inggris
+            const idText = item.meaning_id || item.meaning; 
+
+            // 1. Buat Utterance Jepang
+            const uJP = new SpeechSynthesisUtterance(jpText);
+            uJP.lang = 'ja-JP'; 
+            uJP.rate = 0.8; 
+
+            // 2. Buat Utterance Indo
+            const uID = new SpeechSynthesisUtterance(idText);
+            uID.lang = 'id-ID'; 
+            uID.rate = 0.9;
+
+            // === HACK: AUDIO SILENT UNTUK KEEP ALIVE SAAT LAYAR MATI ===
+            // Ini mencoba menipu browser agar mengira ada audio aktif
+            const silence = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA==");
+            silence.play().catch(() => {}); // Fire and forget
+
+            // Chain events: JP selesai -> Tunggu -> Baca Indo
+            uJP.onend = () => {
+                if(!isAutoMode && !isTTSOn) return; 
+                
+                setTimeout(() => {
+                    window.speechSynthesis.speak(uID);
+                }, 300); // Jeda dipercepat jadi 0.3 detik
+            };
+
+            uID.onend = () => {
+                if(onComplete) onComplete();
+            };
+
+            // Mulai baca Jepang
+            window.speechSynthesis.speak(uJP);
         }
 
         function openAutoSettings() {
@@ -963,38 +1038,61 @@
             document.getElementById('auto-modal').classList.add('show');
         }
         function closeAutoSettings() { document.getElementById('auto-modal').classList.remove('show'); }
+        
         function startAutoPlay() {
             closeAutoSettings();
             const speed = parseInt(document.getElementById('speed-range').value) * 1000;
             isAutoMode = true;
             document.getElementById('btn-auto').classList.add('auto-active');
             document.getElementById('btn-auto').innerHTML = '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+            
+            // Aktifkan Wake Lock (Layar Tetap Nyala)
+            requestWakeLock();
+            
             runAutoSequence(speed);
         }
+        
         function stopAutoPlay() {
-            isAutoMode = false; clearTimeout(autoTimer);
+            isAutoMode = false; 
+            clearTimeout(autoTimer);
+            window.speechSynthesis.cancel();
             document.getElementById('btn-auto').classList.remove('auto-active');
             document.getElementById('btn-auto').innerHTML = '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+            
+            // Lepaskan Wake Lock
+            releaseWakeLock();
         }
 
         function runAutoSequence(speed) {
             if(!isAutoMode) return;
+            
+            // Tunggu 'speed' detik sebelum membalik kartu
             autoTimer = setTimeout(() => {
                 if(!isAutoMode) return;
+                
+                // Balik Kartu
                 vFlip = true; vTarget = 1; drawCard();
-                speakDefinition();
-                setTimeout(() => {
-                    if(!isAutoMode) return;
-                     setTimeout(() => {
+                
+                // Baca Jepang -> Indo -> Lanjut Next
+                speakDefinition(() => {
+                    // Setelah selesai baca Indo, tunggu 1 detik lalu pindah
+                    setTimeout(() => {
                         if(!isAutoMode) return;
+                        
                         if(vIndex < shuffledIndices.length - 1) {
-                            vIndex++; vFlip = false; vTarget = 0; vAnim = 0;
+                            vIndex++; 
+                            vFlip = false; vTarget = 0; vAnim = 0;
                             updateVocabKnownBtn(); drawCard();
+                            // Translate next meaning in background
                             translateMeaning(getCurrentIndex());
+                            // Loop lagi
                             runAutoSequence(speed);
-                        } else { stopAutoPlay(); }
-                     }, 1500);
-                }, 1000); 
+                        } else { 
+                            stopAutoPlay(); 
+                        }
+                    }, 1000); 
+                });
+                
             }, speed);
         }
 
@@ -1005,7 +1103,6 @@
             if(vKnown[word]) delete vKnown[word]; else vKnown[word] = true;
             localStorage.setItem('knownVocabMap', JSON.stringify(vKnown));
             
-            // Trigger save to cloud
             triggerSave();
 
             if(isFilterMode && vKnown[word]) {
@@ -1054,9 +1151,7 @@
             if(vKnown[word]) {
                 delete vKnown[word];
                 localStorage.setItem('knownVocabMap', JSON.stringify(vKnown));
-                // Trigger save to cloud
                 triggerSave();
-
                 openKnownList(); 
                 const idx = getCurrentIndex();
                 if(idx !== -1 && vList[idx].word === word) { updateVocabKnownBtn(); drawCard(); }
@@ -1102,10 +1197,7 @@
         function toggleKanji(char) {
             if(kKnown[char]) delete kKnown[char]; else kKnown[char] = true;
             localStorage.setItem('knownKanjiMap', JSON.stringify(kKnown));
-            
-            // Trigger save to cloud
             triggerSave();
-
             if(currentTab === 'kanji') updateStats(Object.keys(kKnown).filter(k => kList.includes(k)).length);
             if(kCurrentChar === char) updateModalBtn();
             const el = document.getElementById(`k-${char}`);
@@ -1148,10 +1240,8 @@
             document.getElementById('m-char').innerText = char;
             document.getElementById('m-mean').innerText = "...";
             document.getElementById('m-mean-en').innerText = "";
-            
             document.getElementById('m-kun').innerHTML = "-";
             document.getElementById('m-on').innerHTML = "-";
-            
             updateModalBtn();
 
             try {
