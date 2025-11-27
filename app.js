@@ -70,7 +70,7 @@ if (vCanvas) {
   vCanvas.addEventListener("click", handleCanvasClick);
 }
 
-// Listener Enter Key untuk Password
+// Listener Enter Key untuk Password (LOGIN FORM)
 document.addEventListener("DOMContentLoaded", () => {
   const passwordInput = document.getElementById("auth-password");
   if (passwordInput) {
@@ -305,7 +305,7 @@ async function saveCloudProgress() {
 }
 
 // ============================================
-// 5. LOGIKA KANJI (YANG BERMASALAH TADI)
+// 5. LOGIKA KANJI
 // ============================================
 
 async function loadKanjiData(level) {
@@ -1078,6 +1078,28 @@ async function releaseWakeLock() {
     wakeLock = null;
   }
 }
+
+// --- SHORTCUT NAVIGASI (DESKTOP) ---
+document.addEventListener("keydown", (e) => {
+  const isTyping =
+    document.activeElement.tagName === "INPUT" ||
+    document.activeElement.tagName === "TEXTAREA";
+
+  if (currentTab === "vocab" && !isTyping) {
+    if (e.key === " " || e.key === "Enter") {
+      e.preventDefault();
+      flipCard();
+    }
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      nextCard();
+    }
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      prevCard();
+    }
+  }
+});
 
 // --- LOAD AWAL ---
 resizeVocabCanvas();
