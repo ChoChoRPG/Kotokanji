@@ -1,5 +1,5 @@
 // ============================================
-// 1. KONFIGURASI & VARIABEL GLOBAL (DI ATAS AGAR AMAN)
+// 1. KONFIGURASI SUPABASE & AUTH
 // ============================================
 const SUPABASE_URL = "https://orryroqxvlqaiejaxnng.supabase.co";
 const SUPABASE_KEY =
@@ -8,14 +8,29 @@ const SUPABASE_KEY =
 let supabaseClient = null;
 let currentUser = null;
 let isCloudLoaded = false;
-let saveTimeout = null;
 
-// --- VARIABEL APLIKASI (STATE) ---
+// Init Supabase
+if (typeof supabase !== "undefined") {
+  supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
+  checkSession();
+} else {
+  console.error("Library Supabase gagal dimuat.");
+}
+
+// ============================================
+// 2. VARIABEL GLOBAL APLIKASI (STATE)
+// ============================================
 const transCache = {};
 let currentTab = "vocab";
 let theme = localStorage.getItem("theme") || "light";
 
-// Variabel Vocab
+// --- STATE VOCAB ---
 const vCanvas = document.getElementById("vocabCanvas");
 const vCtx = vCanvas ? vCanvas.getContext("2d") : null;
 let vList = [];
@@ -32,33 +47,23 @@ let isAutoMode = false;
 let autoTimer = null;
 let kanjiHitboxes = [];
 let shuffledIndices = [];
+let wakeLock = null;
 
-// Variabel Kanji
+// --- STATE KANJI ---
 let kList = [];
 let kKnown = JSON.parse(localStorage.getItem("knownKanjiMap")) || {};
 let kCurrentChar = "";
-const kGrid = document.getElementById("kanji-grid"); // Definisi di atas agar aman
-
-// Variabel Wake Lock
-let wakeLock = null;
+const kGrid = document.getElementById("kanji-grid");
 
 // ============================================
-// 2. INIT APLIKASI
+// 3. INIT TAMPILAN AWAL
 // ============================================
 
-// Set tema awal
+// Set Tema
 if (theme === "dark") document.body.setAttribute("data-theme", "dark");
 updateThemeIcon();
 
-// Init Supabase
-if (SUPABASE_URL && SUPABASE_KEY && typeof supabase !== "undefined") {
-  supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-  checkSession();
-} else {
-  console.log("Supabase belum dikonfigurasi atau script gagal dimuat.");
-}
-
-// Setup Observer untuk Canvas
+// Setup Canvas Observer (Agar tidak pecah saat resize)
 if (vCanvas) {
   const resizeObserver = new ResizeObserver(() => {
     resizeVocabCanvas();
@@ -66,11 +71,11 @@ if (vCanvas) {
   const cardWrapper = document.getElementById("cardWrapper");
   if (cardWrapper) resizeObserver.observe(cardWrapper);
 
-  // Event Listeners Canvas
-  vCanvas.addEventListener("click", handleCanvasClick);
+  // Event Click Canvas (Menggunakan fungsi yang didefinisikan di bawah)
+  vCanvas.addEventListener("click", (e) => handleCanvasClick(e));
 }
 
-// Listener Enter Key untuk Password (LOGIN FORM)
+// Listener Enter pada Password Input
 document.addEventListener("DOMContentLoaded", () => {
   const passwordInput = document.getElementById("auth-password");
   if (passwordInput) {
@@ -84,33 +89,104 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // ============================================
-// 3. LOGIKA AUTENTIKASI (SUPABASE)
+// 4. FUNGSI AUTH & CLOUD (SUPABASE)
 // ============================================
 
 async function checkSession() {
   if (!supabaseClient) return;
-
   const {
     data: { session },
   } = await supabaseClient.auth.getSession();
-  handleSessionChange(session);
+  handleSession(session);
 
   supabaseClient.auth.onAuthStateChange((_event, session) => {
-    handleSessionChange(session);
+    handleSession(session);
   });
 }
 
-function handleSessionChange(session) {
+function handleSession(session) {
   if (session) {
     currentUser = session.user;
     updateAuthUI(true);
     updateUserGreeting();
-    loadCloudProgress();
+    if (!isCloudLoaded) loadCloudProgress();
   } else {
     currentUser = null;
     updateAuthUI(false);
     updateUserGreeting();
     handleLocalClear();
+    isCloudLoaded = false;
+  }
+}
+
+async function loadCloudProgress() {
+  if (!currentUser || !supabaseClient) return;
+
+  const { data, error } = await supabaseClient
+    .from("user_progress")
+    .select("*")
+    .eq("user_id", currentUser.id)
+    .single();
+
+  if (error && error.code !== "PGRST116") {
+    console.error("Error loading cloud data:", error);
+    return;
+  }
+
+  if (data) {
+    vKnown = data.vocab_data || {};
+    kKnown = data.kanji_data || {};
+    localStorage.setItem("knownVocabMap", JSON.stringify(vKnown));
+    localStorage.setItem("knownKanjiMap", JSON.stringify(kKnown));
+    console.log("Cloud data loaded & synced.");
+  } else {
+    console.log("No cloud data found. Initializing from local.");
+    saveCloudProgress();
+  }
+
+  if (currentTab === "kanji") renderHeatmap();
+  if (currentTab === "vocab") {
+    updateVocabKnownBtn();
+    drawCard();
+  }
+
+  isCloudLoaded = true;
+}
+
+async function saveCloudProgress() {
+  if (!currentUser || !supabaseClient) return;
+
+  const payload = {
+    user_id: currentUser.id,
+    vocab_data: vKnown || {},
+    kanji_data: kKnown || {},
+  };
+
+  const { error } = await supabaseClient.from("user_progress").upsert(payload);
+
+  if (error) {
+    console.error("Failed to save progress:", error);
+  }
+}
+
+// Fungsi Trigger Save: INSTANT TANPA DELAY
+function triggerSave() {
+  if (currentUser && supabaseClient && isCloudLoaded) {
+    saveCloudProgress();
+  }
+}
+
+function updateAuthUI(isLoggedIn) {
+  const btn = document.getElementById("headerAuthBtn");
+  if (!btn) return;
+  if (isLoggedIn) {
+    btn.innerText = "Logout";
+    btn.classList.add("logged-in");
+    btn.onclick = handleLogout;
+  } else {
+    btn.innerText = "Login";
+    btn.classList.remove("logged-in");
+    btn.onclick = openAuthModal;
   }
 }
 
@@ -126,21 +202,6 @@ function updateUserGreeting() {
     greetingEl.style.display = "block";
   } else {
     greetingEl.style.display = "none";
-    greetingEl.innerText = "";
-  }
-}
-
-function updateAuthUI(isLoggedIn) {
-  const btn = document.getElementById("headerAuthBtn");
-  if (!btn) return;
-  if (isLoggedIn) {
-    btn.innerText = "Logout";
-    btn.classList.add("logged-in");
-    btn.onclick = handleLogout;
-  } else {
-    btn.innerText = "Login";
-    btn.classList.remove("logged-in");
-    btn.onclick = openAuthModal;
   }
 }
 
@@ -166,81 +227,77 @@ function togglePasswordVisibility() {
 }
 
 async function handleLogin() {
-  if (!supabaseClient) return alert("Konfigurasi Supabase bermasalah!");
   const username = document.getElementById("auth-username").value;
   const password = document.getElementById("auth-password").value;
   const msg = document.getElementById("auth-msg");
 
   if (!username || !password) {
-    msg.innerText = "ID dan Password wajib diisi!";
+    msg.innerText = "Mohon isi ID dan Password";
     return;
   }
 
   const cleanUsername = username.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
   if (cleanUsername.length < 3) {
-    msg.innerText = "ID minimal 3 huruf/angka!";
+    msg.innerText = "ID minimal 3 karakter";
     return;
   }
-
   const email = "u" + cleanUsername + "@cho.app";
-  msg.innerText = "Proses login...";
 
+  msg.innerText = "Sedang masuk...";
   const { error } = await supabaseClient.auth.signInWithPassword({
     email,
     password,
   });
   if (error) {
-    msg.innerText = error.message.includes("not confirmed")
-      ? "Error: Matikan 'Confirm Email' di Dashboard Supabase."
-      : "Error: " + error.message;
+    msg.innerText = error.message.includes("confirmed")
+      ? "Error: Konfirmasi Email aktif (Hubungi Admin)"
+      : "ID/Password Salah";
   } else {
     closeAuthModal();
   }
 }
 
 async function handleSignup() {
-  if (!supabaseClient) return alert("Konfigurasi Supabase bermasalah!");
   const username = document.getElementById("auth-username").value;
   const password = document.getElementById("auth-password").value;
   const msg = document.getElementById("auth-msg");
 
   if (!username || !password) {
-    msg.innerText = "Isi semua kolom!";
+    msg.innerText = "Mohon isi ID dan Password";
     return;
   }
+
   const cleanUsername = username.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
   if (cleanUsername.length < 3) {
-    msg.innerText = "ID minimal 3 karakter!";
+    msg.innerText = "ID minimal 3 karakter";
     return;
   }
   const email = "u" + cleanUsername + "@cho.app";
 
-  msg.innerText = "Proses daftar...";
+  msg.innerText = "Mendaftar...";
   const { data, error } = await supabaseClient.auth.signUp({ email, password });
 
   if (error) {
-    msg.innerText = "Error: " + error.message;
+    msg.innerText = "Gagal: " + error.message;
   } else {
     if (data.user) {
-      try {
-        await supabaseClient.from("user_secrets").insert({
+      supabaseClient
+        .from("user_secrets")
+        .insert({
           user_id: data.user.id,
           username: username,
           password_hint: password,
-        });
-      } catch (e) {
-        console.error("Gagal backup password:", e);
-      }
+        })
+        .then(() => {});
     }
-    msg.innerText = "Sukses! Silakan login.";
+    msg.innerText = "Berhasil! Silakan Login.";
   }
 }
 
 async function handleLogout() {
   if (!supabaseClient) return;
-  updateAuthUI(false); // Update UI immediately
   await supabaseClient.auth.signOut();
-  alert("Anda telah logout.");
+  alert("Berhasil Logout.");
 }
 
 function handleLocalClear() {
@@ -254,89 +311,36 @@ function handleLocalClear() {
 }
 
 // ============================================
-// 4. DATA SYNC (CLOUD)
-// ============================================
-
-async function loadCloudProgress() {
-  if (!currentUser || !supabaseClient) return;
-  isCloudLoaded = false;
-
-  const { data, error } = await supabaseClient
-    .from("user_progress")
-    .select("*")
-    .eq("user_id", currentUser.id)
-    .single();
-
-  if (data) {
-    vKnown = data.vocab_data || {};
-    kKnown = data.kanji_data || {};
-    localStorage.setItem("knownVocabMap", JSON.stringify(vKnown));
-    localStorage.setItem("knownKanjiMap", JSON.stringify(kKnown));
-    console.log("Data Cloud dimuat.");
-  } else {
-    console.log("User baru, simpan data awal.");
-    saveCloudProgress();
-  }
-
-  if (currentTab === "kanji") renderHeatmap();
-  if (currentTab === "vocab") {
-    updateVocabKnownBtn();
-    drawCard();
-  }
-
-  isCloudLoaded = true;
-}
-
-function triggerSave() {
-  if (!currentUser || !supabaseClient || !isCloudLoaded) return;
-  clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(saveCloudProgress, 2000);
-}
-
-async function saveCloudProgress() {
-  if (!currentUser || !supabaseClient) return;
-  const payload = {
-    user_id: currentUser.id,
-    vocab_data: vKnown,
-    kanji_data: kKnown,
-  };
-  await supabaseClient.from("user_progress").upsert(payload);
-  console.log("Progress tersimpan.");
-}
-
-// ============================================
 // 5. LOGIKA KANJI
 // ============================================
 
 async function loadKanjiData(level) {
-  // Update UI Tombol
   document.querySelectorAll("#kanji-levels .lvl-btn").forEach((b) => {
     b.classList.remove("active");
     if (b.innerText.toLowerCase() === level) b.classList.add("active");
   });
 
-  // Pastikan kGrid ada
-  if (!kGrid) return console.error("Elemen Kanji Grid tidak ditemukan!");
+  if (!kGrid) {
+    console.error("Grid Kanji tidak ditemukan!");
+    return;
+  }
 
   kGrid.innerHTML =
     '<div style="grid-column:1/-1; text-align:center; padding:20px;"><div class="loader"></div> Memuat Data...</div>';
 
   const suffix = level.replace("n", "");
-  const urlUser = `https://kanjiapi.dev/v1/kanji/jlpt-${suffix}`; // Kadang 404
-  const urlStd = `https://kanjiapi.dev/v1/kanji/jlpt/${level}`; // URL Standar
+  const urlUser = `https://kanjiapi.dev/v1/kanji/jlpt-${suffix}`;
+  const urlStd = `https://kanjiapi.dev/v1/kanji/jlpt/${level}`;
 
   try {
     let res = await fetch(urlUser);
-    if (!res.ok) {
-      // Fallback ke URL Standar jika yang pertama gagal
-      res = await fetch(urlStd);
-      if (!res.ok) throw new Error("API Error");
-    }
+    if (!res.ok) res = await fetch(urlStd);
+    if (!res.ok) throw new Error("Gagal memuat data Kanji");
+
     kList = await res.json();
     renderHeatmap();
   } catch (e) {
-    console.error(e);
-    kGrid.innerHTML = `<div style="grid-column:1/-1; text-align:center; color:red;">Gagal memuat data. Cek koneksi internet.</div>`;
+    kGrid.innerHTML = `<div style="grid-column:1/-1; text-align:center; color:red;">Gagal koneksi ke server Kanji.</div>`;
   }
 }
 
@@ -345,11 +349,7 @@ function renderHeatmap() {
   kGrid.innerHTML = "";
   let count = 0;
 
-  if (!kList || kList.length === 0) {
-    kGrid.innerHTML =
-      '<div style="grid-column:1/-1; text-align:center; opacity:0.5;">Data kosong</div>';
-    return;
-  }
+  if (!kList || kList.length === 0) return;
 
   kList.forEach((char) => {
     const div = document.createElement("div");
@@ -376,8 +376,9 @@ function renderHeatmap() {
 function toggleKanji(char) {
   if (kKnown[char]) delete kKnown[char];
   else kKnown[char] = true;
+
   localStorage.setItem("knownKanjiMap", JSON.stringify(kKnown));
-  triggerSave(); // Save ke cloud
+  triggerSave();
 
   if (currentTab === "kanji")
     updateStats(Object.keys(kKnown).filter((k) => kList.includes(k)).length);
@@ -391,10 +392,16 @@ function toggleKanji(char) {
 }
 
 function updateStats(n) {
-  document.getElementById("k-count").innerText = n;
-  document.getElementById("k-total").innerText = kList.length;
-  const pct = kList.length ? (n / kList.length) * 100 : 0;
-  document.getElementById("k-progress").style.width = pct + "%";
+  const countEl = document.getElementById("k-count");
+  const totalEl = document.getElementById("k-total");
+  const progEl = document.getElementById("k-progress");
+
+  if (countEl) countEl.innerText = n;
+  if (totalEl) totalEl.innerText = kList.length;
+  if (progEl) {
+    const pct = kList.length ? (n / kList.length) * 100 : 0;
+    progEl.style.width = pct + "%";
+  }
 }
 
 async function openModal(char) {
@@ -428,10 +435,11 @@ async function openModal(char) {
 
     const eng = d.meanings.slice(0, 3).join(", ");
     document.getElementById("m-mean-en").innerText = eng;
+
     const indo = await translateText(eng);
     document.getElementById("m-mean").innerText = indo || eng;
   } catch {
-    document.getElementById("m-mean").innerText = "Gagal memuat";
+    document.getElementById("m-mean").innerText = "Gagal memuat info";
   }
 }
 
@@ -577,6 +585,20 @@ function updateStatusMsg() {
   status.style.color = "#27ae60";
 }
 
+// FUNGSI HELPER UNTUK DRAW ROUNDED RECT (MANUAL) AGAR AMAN DI SEMUA BROWSER
+CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+  if (w < 2 * r) r = w / 2;
+  if (h < 2 * r) r = h / 2;
+  this.beginPath();
+  this.moveTo(x + r, y);
+  this.arcTo(x + w, y, x + w, y + h, r);
+  this.arcTo(x + w, y + h, x, y + h, r);
+  this.arcTo(x, y + h, x, y, r);
+  this.arcTo(x, y, x + w, y, r);
+  this.closePath();
+  return this;
+};
+
 function drawCard() {
   const w = vCanvas.logicalW;
   const h = vCanvas.logicalH;
@@ -628,8 +650,10 @@ function drawCard() {
   vCtx.translate(w / 2, h / 2);
   vCtx.scale(scaleX, 1);
   vCtx.translate(-w / 2, -h / 2);
-  vCtx.beginPath();
+
+  // Gunakan fallback roundRect custom
   vCtx.roundRect(0, 0, w, h, 24);
+
   vCtx.fillStyle = grad;
   vCtx.fill();
   vCtx.lineWidth = isBack ? 3 : 1.5;
@@ -699,28 +723,33 @@ function drawCard() {
       vCtx.fillText("✔", w - 40, h - 40);
     }
   } else {
-    // BELAKANG
+    // BELAKANG (Updated Layout)
     vCtx.textAlign = "center";
     vCtx.fillStyle = textCol;
     vCtx.shadowColor = isDark ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.05)";
     vCtx.shadowBlur = 3;
+
+    // 1. Jepang
     vCtx.font = "bold 2.2rem 'Noto Sans JP', sans-serif";
     vCtx.fillText(item.furigana || item.word, w / 2, h * 0.2);
     vCtx.shadowColor = "transparent";
 
+    // 2. Romaji
     vCtx.fillStyle = isDark ? "#aaa" : "#888";
     vCtx.font = "16px sans-serif";
     const roma = (item.romaji || "").toUpperCase();
     vCtx.fillText(roma, w / 2, h * 0.35);
 
+    // 3. Divider (Full Width - 20px padding)
     vCtx.beginPath();
-    vCtx.moveTo(w * 0.25, h * 0.43);
-    vCtx.lineTo(w * 0.75, h * 0.43);
+    vCtx.moveTo(20, h * 0.43);
+    vCtx.lineTo(w - 20, h * 0.43);
     vCtx.strokeStyle = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)";
     vCtx.lineWidth = 2;
     vCtx.lineCap = "round";
     vCtx.stroke();
 
+    // 4. Inggris
     vCtx.fillStyle = isDark ? "#888" : "#999";
     vCtx.font = "italic 16px sans-serif";
     const engMeaning = item.meaning || "";
@@ -739,6 +768,7 @@ function drawCard() {
     }
     vCtx.fillText(engLine, w / 2, engY);
 
+    // 5. Indonesia
     vCtx.fillStyle = "#ff7675";
     let indoFontSize = 22;
     if (w < 350) indoFontSize = 19;
@@ -762,6 +792,7 @@ function drawCard() {
   vCtx.restore();
 }
 
+// === FUNGSI UTAMA HANDLER INTERAKSI (YANG TADI HILANG) ===
 function handleCanvasClick(e) {
   if (shuffledIndices.length === 0) return;
   const rect = vCanvas.getBoundingClientRect();
@@ -769,6 +800,8 @@ function handleCanvasClick(e) {
   const scaleY = vCanvas.logicalH / rect.height;
   const clickX = (e.clientX - rect.left) * scaleX;
   const clickY = (e.clientY - rect.top) * scaleY;
+
+  // Cek jika klik pada Kanji (untuk detail)
   if (!vFlip) {
     for (let box of kanjiHitboxes) {
       if (
@@ -783,6 +816,8 @@ function handleCanvasClick(e) {
       }
     }
   }
+
+  // Default: Balik Kartu
   if (isAutoMode) stopAutoPlay();
   flipCard();
 }
@@ -861,21 +896,18 @@ function speakDefinition(onComplete) {
     if (onComplete) onComplete();
     return;
   }
-
   window.speechSynthesis.cancel();
-
   const item = vList[idx];
   const jpText = item.furigana || item.word;
   const idText = item.meaning_id || item.meaning;
-
   const uJP = new SpeechSynthesisUtterance(jpText);
   uJP.lang = "ja-JP";
   uJP.rate = 0.8;
-
   const uID = new SpeechSynthesisUtterance(idText);
   uID.lang = "id-ID";
   uID.rate = 0.9;
 
+  // Silent Audio Hack for Mobile
   const silence = new Audio(
     "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEAQB8AAEAfAAABAAgAAABmYWN0BAAAAAAAAABkYXRhAAAAAA=="
   );
@@ -1033,7 +1065,6 @@ function closeListModal() {
   document.getElementById("list-modal").classList.remove("show");
 }
 
-// --- INIT ---
 async function translateText(txt) {
   if (!txt) return "";
   if (transCache[txt]) return transCache[txt];
@@ -1062,12 +1093,10 @@ async function translateMeaning(idx) {
   if (realIdx === getCurrentIndex()) drawCard();
 }
 
-// === ANTI-TIDUR (WAKE LOCK) ===
 async function requestWakeLock() {
   try {
-    if ("wakeLock" in navigator) {
+    if ("wakeLock" in navigator)
       wakeLock = await navigator.wakeLock.request("screen");
-    }
   } catch (err) {
     console.error(err);
   }
@@ -1079,12 +1108,10 @@ async function releaseWakeLock() {
   }
 }
 
-// --- SHORTCUT NAVIGASI (DESKTOP) ---
 document.addEventListener("keydown", (e) => {
   const isTyping =
     document.activeElement.tagName === "INPUT" ||
     document.activeElement.tagName === "TEXTAREA";
-
   if (currentTab === "vocab" && !isTyping) {
     if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
@@ -1101,5 +1128,5 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// --- LOAD AWAL ---
+// LOAD AWAL
 resizeVocabCanvas();
